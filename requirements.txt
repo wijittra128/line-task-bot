@@ -4,3 +4,4 @@ apscheduler
 gunicorn
 pymongo
 google-generativeai
+certifi

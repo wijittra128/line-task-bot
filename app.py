@@ -16,6 +16,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageCo
 from apscheduler.schedulers.background import BackgroundScheduler
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
+import certifi
 import google.generativeai as genai
 
 app = Flask(__name__)
@@ -59,7 +60,7 @@ def init_db():
         db_status = "❌ MONGO_URI is empty"
         return False
     try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, tlsCAFile=certifi.where())
         # Check connection
         client.admin.command('ping')
         db = client['task_bot_db']
