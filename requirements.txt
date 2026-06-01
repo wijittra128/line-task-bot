@@ -2,6 +2,5 @@ flask
 line-bot-sdk
 apscheduler
 gunicorn
-gspread
-google-auth
+pymongo
 google-generativeai

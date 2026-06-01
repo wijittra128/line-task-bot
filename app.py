@@ -14,8 +14,8 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent, ImageMessageContent, FollowEvent
 from apscheduler.schedulers.background import BackgroundScheduler
-import gspread
-from google.oauth2.service_account import Credentials
+from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure
 import google.generativeai as genai
 
 app = Flask(__name__)
@@ -24,8 +24,7 @@ app = Flask(__name__)
 CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN", "")
 CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET", "")
 USER_ID = os.environ.get("USER_ID", "")
-GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL", "https://docs.google.com/spreadsheets/d/1B-m_g3rUy6_0PxwIJ2BtvDgoNX66VmX_d80-HHJt7GA/edit")
-GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_SHEETS_CREDS", "")
+MONGO_URI = os.environ.get("MONGO_URI", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
@@ -49,95 +48,46 @@ def ask_gemini(prompt, system_instruction=""):
         print(f"Gemini Error: {e}")
         return "❌ ขออภัยค่ะ AI ขัดข้องชั่วคราว ลองใหม่อีกครั้งนะคะ"
 
-# --- GOOGLE SHEETS SETUP & CACHING ---
+# --- MONGODB SETUP & CACHING ---
 task_cache = []
-sheets_status = "Not Connected"
+db_status = "Not Connected"
+collection = None
 
-def get_sheet():
-    global sheets_status
-    if not GOOGLE_CREDS_JSON:
-        sheets_status = "❌ GOOGLE_SHEETS_CREDS is empty"
-        return None
+def init_db():
+    global db_status, collection
+    if not MONGO_URI:
+        db_status = "❌ MONGO_URI is empty"
+        return False
     try:
-        # Robust JSON extraction: Find first { and last }
-        raw_json = GOOGLE_CREDS_JSON.strip()
-        start_idx = raw_json.find('{')
-        end_idx = raw_json.rfind('}')
-        
-        if start_idx == -1 or end_idx == -1:
-            sheets_status = "❌ Invalid format: Could not find { or }"
-            return None
-            
-        cleaned_json = raw_json[start_idx:end_idx+1]
-        creds_dict = json.loads(cleaned_json)
-        
-        # Universal PEM Key Repair Logic
-        if 'private_key' in creds_dict:
-            pk = creds_dict['private_key']
-            try:
-                # Find any header starting with -----BEGIN and footer ending with -----
-                import re
-                header_match = re.search(r"-----BEGIN [^-]+-----", pk)
-                footer_match = re.search(r"-----END [^-]+-----", pk)
-                
-                if header_match and footer_match:
-                    header = header_match.group(0)
-                    footer = footer_match.group(0)
-                    
-                    # Extract the part between header and footer
-                    start_pos = pk.find(header) + len(header)
-                    end_pos = pk.find(footer)
-                    inner = pk[start_pos:end_pos]
-                    
-                    # Clean ALL possible noise: newlines, escaped newlines, spaces, tabs
-                    # Join all fragments to get one clean base64 string
-                    base64_data = "".join(inner.replace("\\n", "").split())
-                    
-                    # Reconstruct standard PEM: Header + 64-char lines + Footer
-                    formatted_body = "\n".join([base64_data[i:i+64] for i in range(0, len(base64_data), 64)])
-                    repaired_pk = f"{header}\n{formatted_body}\n{footer}\n"
-                    
-                    creds_dict['private_key'] = repaired_pk
-                    print(f"✅ Repaired PEM key with header: {header}")
-            except Exception as e:
-                print(f"Failed to repair PEM key: {e}")
-        
-        scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-        creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_url(GOOGLE_SHEET_URL).sheet1
-        sheets_status = "✅ Connected Successfully"
-        return sheet
-    except json.JSONDecodeError as e:
-        sheets_status = f"❌ JSON Error: {e}. Check your JSON content."
-        print(f"JSON Decode Error: {e}")
-        return None
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+        # Check connection
+        client.admin.command('ping')
+        db = client['task_bot_db']
+        collection = db['tasks']
+        db_status = "✅ Connected Successfully to MongoDB"
+        refresh_cache()
+        return True
+    except ConnectionFailure as e:
+        db_status = f"❌ Connection Error: {e}"
+        print(f"MongoDB Connection Error: {e}")
+        collection = None
+        return False
     except Exception as e:
-        sheets_status = f"❌ Connection Error: {e}"
-        print(f"Error connecting to Sheets: {e}")
-        return None
+        db_status = f"❌ Error: {e}"
+        print(f"MongoDB Error: {e}")
+        collection = None
+        return False
 
 def refresh_cache():
     global task_cache
-    sheet = get_sheet()
-    if sheet:
+    if collection is not None:
         try:
-            task_cache = sheet.get_all_records()
-            print(f"Cache refreshed: {len(task_cache)} tasks loaded.")
+            # Exclude MongoDB's internal _id from cache to keep it clean
+            tasks = list(collection.find({}, {'_id': False}))
+            task_cache = tasks
+            print(f"Cache refreshed: {len(task_cache)} tasks loaded from MongoDB.")
         except Exception as e:
-            print(f"Error fetching records: {e}")
-
-def init_sheet():
-    sheet = get_sheet()
-    if sheet:
-        try:
-            headers = ["ID", "Name", "Description", "Assignee", "Deadline", "Status", "Link", "ImageID", "CompletedAt", "CreatedAt"]
-            existing_headers = sheet.row_values(1)
-            if not existing_headers:
-                sheet.append_row(headers)
-            refresh_cache()
-        except Exception as e:
-            print(f"Error initializing sheet: {e}")
+            print(f"Error fetching records from MongoDB: {e}")
 
 def get_next_id():
     if not task_cache: return 1
@@ -173,8 +123,8 @@ def format_date(date_str):
 def get_ai_summary():
     if not task_cache: return "📭 ยังไม่มีงานในระบบเลยจ้า!"
     
-    pending = [t for t in task_cache if t['Status'] == 'Pending']
-    completed = [t for t in task_cache if t['Status'] == 'Sent']
+    pending = [t for t in task_cache if t.get('Status') == 'Pending']
+    completed = [t for t in task_cache if t.get('Status') == 'Sent']
     
     prompt = (f"ช่วยสรุปตารางงานนี้ให้ดูน่าอ่าน เป็นกันเอง และให้กำลังใจทีมงานหน่อยค่ะ:\n"
               f"งานที่ยังไม่ได้ทำ ({len(pending)} งาน): {json.dumps(pending, ensure_ascii=False)}\n"
@@ -192,11 +142,11 @@ def index():
     <body style="font-family: sans-serif; padding: 20px;">
         <h1>Bot Status 🤖✨</h1>
         <p><b>Gemini AI:</b> {"✅ Enabled" if model else "❌ Disabled (Check GEMINI_API_KEY)"}</p>
-        <p><b>Google Sheets:</b> {sheets_status}</p>
+        <p><b>MongoDB:</b> {db_status}</p>
         <p><b>Tasks in Cache:</b> {len(task_cache)}</p>
         <p><b>LINE Webhook:</b> Ready at /callback</p>
         <hr>
-        <p style="color: gray;"><i>If Google Sheets shows an error, check your Environment Variables in Render. Ensure GOOGLE_SHEETS_CREDS is a clean JSON string.</i></p>
+        <p style="color: gray;"><i>Ensure MONGO_URI is set correctly in your Render Environment Variables.</i></p>
     </body>
     </html>
     """
@@ -207,18 +157,9 @@ def callback():
     signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
     
-    # Debugging logs
-    print(f"--- Webhook Received ---")
-    print(f"Path: {request.path}")
-    print(f"Signature: {signature}")
-    print(f"Secret Length: {len(CHANNEL_SECRET)}")
-    if CHANNEL_SECRET:
-        print(f"Secret: {CHANNEL_SECRET[:4]}...{CHANNEL_SECRET[-4:]}")
-    
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("❌ Invalid Signature Error!")
         abort(400)
     except Exception as e:
         print(f"❌ Error: {e}")
@@ -262,28 +203,44 @@ def handle_message(event):
             try:
                 parsed_date = datetime.datetime.strptime(text, "%d/%m/%Y")
                 db_deadline = parsed_date.replace(hour=23, minute=59, second=59).strftime("%Y-%m-%d %H:%M:%S")
-                sheet = get_sheet()
-                if sheet:
+                
+                if collection is not None:
                     new_id = get_next_id()
                     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    sheet.append_row([new_id, state["data"]["name"], state["data"]["description"], state["data"]["assignee"], db_deadline, "Pending", "", "", "", now])
+                    
+                    new_task = {
+                        "ID": new_id,
+                        "Name": state["data"]["name"],
+                        "Description": state["data"]["description"],
+                        "Assignee": state["data"]["assignee"],
+                        "Deadline": db_deadline,
+                        "Status": "Pending",
+                        "Link": "",
+                        "ImageID": "",
+                        "CompletedAt": "",
+                        "CreatedAt": now
+                    }
+                    
+                    collection.insert_one(new_task)
                     refresh_cache()
                     reply = f"✅ ลงตารางงานให้แล้วค่ะ! ID: {new_id}"
+                else:
+                    reply = "❌ ระบบฐานข้อมูล MongoDB ขัดข้องค่ะ ไม่สามารถบันทึกงานได้"
                 del user_states[uid]
-            except:
+            except Exception as e:
+                print(f"Error creating task: {e}")
                 reply = "❌ วันที่ผิดรูปแบบค่ะ (วว/ดด/ปปปป)"
 
     # 2. Flow: ส่งงาน
     elif uid in user_states and user_states[uid]["action"] == "completing":
-        # ... (Same logic as before, but using cache and sheet update)
         state = user_states[uid]
         if state["step"] == "id":
             if text.isdigit():
                 task_id = int(text)
-                task = next((t for t in task_cache if int(t['ID']) == task_id), None)
+                task = next((t for t in task_cache if int(t.get('ID', 0)) == task_id), None)
                 if not task:
                     reply = f"❌ ไม่พบงาน ID {task_id} ค่ะ"
-                elif task['Status'] == 'Sent':
+                elif task.get('Status') == 'Sent':
                     reply = f"⚠️ งานนี้ส่งไปแล้วค่ะ!"
                     del user_states[uid]
                 else:
@@ -293,17 +250,24 @@ def handle_message(event):
             else: reply = "❌ ใส่ ID เป็นตัวเลขนะคะ"
         elif state["step"] == "link":
             link = "" if text == "ไม่มี" else text
-            sheet = get_sheet()
-            cell = sheet.find(str(state["data"]["id"]))
-            if cell:
+            
+            if collection is not None:
                 now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                sheet.update_cell(cell.row, 6, "Sent")
-                sheet.update_cell(cell.row, 7, link)
-                sheet.update_cell(cell.row, 9, now)
+                task_id = state["data"]["id"]
+                
+                # Update in MongoDB
+                collection.update_one(
+                    {"ID": task_id},
+                    {"$set": {"Status": "Sent", "Link": link, "CompletedAt": now}}
+                )
+                
                 refresh_cache()
                 reply = "✅ ส่งงานเรียบร้อย! ส่งรูปภาพยืนยันมาได้เลยนะคะ (หรือพิมพ์ 'ไม่มี')"
                 state["step"] = "image"
-                state["task_id"] = state["data"]["id"]
+                state["task_id"] = task_id
+            else:
+                reply = "❌ ระบบฐานข้อมูล MongoDB ขัดข้องค่ะ"
+                del user_states[uid]
 
     # --- DIRECT COMMANDS & GEMINI AI ---
     else:
@@ -314,9 +278,12 @@ def handle_message(event):
             user_states[uid] = {"action": "completing", "step": "id", "data": {}}
             reply = "🔢 งาน ID อะไรคะ?"
         elif text == "เช็คงาน":
-            reply = get_ai_summary() # AI summarizes tasks
-        elif text == "เช็คงานดิบ": # Non-AI backup
-            reply = "📋 งานทั้งหมด:\n" + "\n".join([f"- {t['ID']}: {t['Description']} ({t['Status']})" for t in task_cache[:10]])
+            reply = get_ai_summary()
+        elif text == "เช็คงานดิบ":
+            if task_cache:
+                reply = "📋 งานทั้งหมด:\n" + "\n".join([f"- {t.get('ID')}: {t.get('Description')} ({t.get('Status')})" for t in task_cache[:10]])
+            else:
+                reply = "📭 ยังไม่มีงานในระบบค่ะ"
         elif text == "แนะนำ" or text.lower() == "help":
             reply = get_help_message()
         else:
@@ -333,19 +300,25 @@ def handle_image(event):
     uid = event.source.user_id
     if uid in user_states and user_states[uid].get("step") == "image":
         task_id = user_states[uid]["task_id"]
-        sheet = get_sheet()
-        cell = sheet.find(str(task_id))
-        if cell:
-            sheet.update_cell(cell.row, 8, event.message.id)
-        refresh_cache()
+        
+        if collection is not None:
+            collection.update_one(
+                {"ID": task_id},
+                {"$set": {"ImageID": event.message.id}}
+            )
+            refresh_cache()
+            reply = "🖼️ บันทึกรูปภาพเรียบร้อย! ปิดจ๊อบสมบูรณ์จ้า ✨"
+        else:
+            reply = "❌ ไม่สามารถบันทึกรูปภาพได้เนื่องจากฐานข้อมูลขัดข้อง"
+            
         del user_states[uid]
-        reply = "🖼️ บันทึกรูปภาพเรียบร้อย! ปิดจ๊อบสมบูรณ์จ้า ✨"
+        
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             line_bot_api.reply_message(ReplyMessageRequest(reply_token=event.reply_token, messages=[TextMessage(text=reply)]))
 
 # --- INITIALIZATION ---
-init_sheet()
+init_db()
 scheduler = BackgroundScheduler(timezone="Asia/Bangkok")
 scheduler.add_job(refresh_cache, 'interval', minutes=5)
 scheduler.start()
