@@ -24,7 +24,7 @@ app = Flask(__name__)
 CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN", "")
 CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET", "")
 USER_ID = os.environ.get("USER_ID", "")
-GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL", "https://docs.google.com/spreadsheets/d/1N3JWeiI42rGn_F6YKGmIhUWjmQhbov3SMsBiCco2XVA/edit")
+GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL", "https://docs.google.com/spreadsheets/d/1B-m_g3rUy6_0PxwIJ2BtvDgoNX66VmX_d80-HHJt7GA/edit")
 GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_SHEETS_CREDS", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
@@ -71,26 +71,36 @@ def get_sheet():
         cleaned_json = raw_json[start_idx:end_idx+1]
         creds_dict = json.loads(cleaned_json)
         
-        # Super Robust Private Key Repair
+        # Universal PEM Key Repair Logic
         if 'private_key' in creds_dict:
             pk = creds_dict['private_key']
-            header = "-----BEGIN PRIVATE KEY-----"
-            footer = "-----END PRIVATE KEY-----"
-            if header in pk and footer in pk:
-                try:
-                    # Extract the middle part
-                    inner = pk.split(header)[1].split(footer)[0]
-                    # Remove ALL whitespace, newlines, and escaped newlines
-                    # This handles \n, \\n, spaces, etc.
-                    inner = "".join(inner.replace("\\n", "").split())
+            try:
+                # Find any header starting with -----BEGIN and footer ending with -----
+                import re
+                header_match = re.search(r"-----BEGIN [^-]+-----", pk)
+                footer_match = re.search(r"-----END [^-]+-----", pk)
+                
+                if header_match and footer_match:
+                    header = header_match.group(0)
+                    footer = footer_match.group(0)
                     
-                    # Reconstruct into proper 64-character line PEM format
-                    lines = [inner[i:i+64] for i in range(0, len(inner), 64)]
-                    repaired_pk = header + "\n" + "\n".join(lines) + "\n" + footer + "\n"
+                    # Extract the part between header and footer
+                    start_pos = pk.find(header) + len(header)
+                    end_pos = pk.find(footer)
+                    inner = pk[start_pos:end_pos]
+                    
+                    # Clean ALL possible noise: newlines, escaped newlines, spaces, tabs
+                    # Join all fragments to get one clean base64 string
+                    base64_data = "".join(inner.replace("\\n", "").split())
+                    
+                    # Reconstruct standard PEM: Header + 64-char lines + Footer
+                    formatted_body = "\n".join([base64_data[i:i+64] for i in range(0, len(base64_data), 64)])
+                    repaired_pk = f"{header}\n{formatted_body}\n{footer}\n"
+                    
                     creds_dict['private_key'] = repaired_pk
-                    print("✅ Private key repaired and formatted.")
-                except Exception as e:
-                    print(f"Error repairing private key: {e}")
+                    print(f"✅ Repaired PEM key with header: {header}")
+            except Exception as e:
+                print(f"Failed to repair PEM key: {e}")
         
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
