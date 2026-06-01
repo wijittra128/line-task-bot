@@ -2,3 +2,5 @@ flask
 line-bot-sdk
 apscheduler
 gunicorn
+gspread
+google-auth
