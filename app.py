@@ -116,8 +116,23 @@ def index():
 def callback():
     signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
-    try: handler.handle(body, signature)
-    except InvalidSignatureError: abort(400)
+    
+    # Debugging logs
+    print(f"--- Webhook Received ---")
+    print(f"Path: {request.path}")
+    print(f"Signature: {signature}")
+    print(f"Secret Length: {len(CHANNEL_SECRET)}")
+    if CHANNEL_SECRET:
+        print(f"Secret: {CHANNEL_SECRET[:4]}...{CHANNEL_SECRET[-4:]}")
+    
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        print("❌ Invalid Signature Error!")
+        abort(400)
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        abort(500)
     return 'OK'
 
 user_states = {}
