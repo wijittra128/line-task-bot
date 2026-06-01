@@ -51,16 +51,32 @@ def ask_gemini(prompt, system_instruction=""):
 
 # --- GOOGLE SHEETS SETUP & CACHING ---
 task_cache = []
+sheets_status = "Not Connected"
 
 def get_sheet():
-    if not GOOGLE_CREDS_JSON: return None
+    global sheets_status
+    if not GOOGLE_CREDS_JSON:
+        sheets_status = "❌ GOOGLE_SHEETS_CREDS is empty"
+        return None
     try:
-        creds_dict = json.loads(GOOGLE_CREDS_JSON)
+        # Attempt to clean the JSON string
+        cleaned_json = GOOGLE_CREDS_JSON.strip()
+        if (cleaned_json.startswith("'") and cleaned_json.endswith("'")) or (cleaned_json.startswith('"') and cleaned_json.endswith('"')):
+            cleaned_json = cleaned_json[1:-1]
+            
+        creds_dict = json.loads(cleaned_json)
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
-        return client.open_by_url(GOOGLE_SHEET_URL).sheet1
+        sheet = client.open_by_url(GOOGLE_SHEET_URL).sheet1
+        sheets_status = "✅ Connected Successfully"
+        return sheet
+    except json.JSONDecodeError as e:
+        sheets_status = f"❌ JSON Error: {e}. Check for extra characters at the start/end."
+        print(f"JSON Decode Error: {e}")
+        return None
     except Exception as e:
+        sheets_status = f"❌ Connection Error: {e}"
         print(f"Error connecting to Sheets: {e}")
         return None
 
@@ -68,17 +84,23 @@ def refresh_cache():
     global task_cache
     sheet = get_sheet()
     if sheet:
-        task_cache = sheet.get_all_records()
-        print(f"Cache refreshed: {len(task_cache)} tasks loaded.")
+        try:
+            task_cache = sheet.get_all_records()
+            print(f"Cache refreshed: {len(task_cache)} tasks loaded.")
+        except Exception as e:
+            print(f"Error fetching records: {e}")
 
 def init_sheet():
     sheet = get_sheet()
     if sheet:
-        headers = ["ID", "Name", "Description", "Assignee", "Deadline", "Status", "Link", "ImageID", "CompletedAt", "CreatedAt"]
-        existing_headers = sheet.row_values(1)
-        if not existing_headers:
-            sheet.append_row(headers)
-    refresh_cache()
+        try:
+            headers = ["ID", "Name", "Description", "Assignee", "Deadline", "Status", "Link", "ImageID", "CompletedAt", "CreatedAt"]
+            existing_headers = sheet.row_values(1)
+            if not existing_headers:
+                sheet.append_row(headers)
+            refresh_cache()
+        except Exception as e:
+            print(f"Error initializing sheet: {e}")
 
 def get_next_id():
     if not task_cache: return 1
@@ -110,7 +132,21 @@ def get_ai_summary():
 # --- WEBHOOK ENDPOINT ---
 @app.route("/", methods=['GET'])
 def index():
-    return f"Bot is running with Gemini AI! 🤖✨ (Cache: {len(task_cache)} tasks)", 200
+    status_html = f"""
+    <html>
+    <head><title>Bot Status</title></head>
+    <body style="font-family: sans-serif; padding: 20px;">
+        <h1>Bot Status 🤖✨</h1>
+        <p><b>Gemini AI:</b> {"✅ Enabled" if model else "❌ Disabled (Check GEMINI_API_KEY)"}</p>
+        <p><b>Google Sheets:</b> {sheets_status}</p>
+        <p><b>Tasks in Cache:</b> {len(task_cache)}</p>
+        <p><b>LINE Webhook:</b> Ready at /callback</p>
+        <hr>
+        <p style="color: gray;"><i>If Google Sheets shows an error, check your Environment Variables in Render. Ensure GOOGLE_SHEETS_CREDS is a clean JSON string.</i></p>
+    </body>
+    </html>
+    """
+    return status_html, 200
 
 @app.route("/callback", methods=['POST'], strict_slashes=False)
 def callback():
