@@ -4,3 +4,4 @@ apscheduler
 gunicorn
 gspread
 google-auth
+google-generativeai
