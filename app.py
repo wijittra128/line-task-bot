@@ -60,7 +60,8 @@ def init_db():
         db_status = "❌ MONGO_URI is empty"
         return False
     try:
-        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, tlsCAFile=certifi.where())
+        # Force ignore SSL certificate validation errors (common issue on some hostings like Render with MongoDB Atlas)
+        client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000, tls=True, tlsAllowInvalidCertificates=True)
         # Check connection
         client.admin.command('ping')
         db = client['task_bot_db']
