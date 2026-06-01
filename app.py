@@ -168,6 +168,10 @@ def check_reminders():
                 except: pass
 
 # --- WEBHOOK ENDPOINT ---
+@app.route("/", methods=['GET'])
+def index():
+    return "Bot is running! 🤖", 200
+
 @app.route("/callback", methods=['POST'])
 def callback():
     signature = request.headers.get('X-Line-Signature')
