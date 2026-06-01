@@ -241,9 +241,9 @@ def handle_message(event):
     reply = ""
 
     # Flow Control
-    if uid in user_states and text == "ยกเลิก":
+    if uid in user_states and (text == "ยกเลิก" or text == "รีเซ็ต"):
         del user_states[uid]
-        reply = "❌ ยกเลิกการทำรายการเรียบร้อยแล้วค่ะ"
+        reply = "❌ ยกเลิกและรีเซ็ตการทำรายการเรียบร้อยแล้วค่ะ เริ่มต้นใหม่ได้เลย!"
 
     # 1. Flow: สั่งงาน (Ordering) 
     elif uid in user_states and user_states[uid]["action"] == "creating":
