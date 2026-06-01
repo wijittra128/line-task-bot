@@ -18,10 +18,10 @@ from apscheduler.schedulers.background import BackgroundScheduler
 app = Flask(__name__)
 
 # --- CONFIGURATION ---
-CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN", "oA8xcZaP7SWLLuEHaz0+H/UsobPNOocSVNihAjwUpy+aJ15F6g4VaYNwLYudXHngw0BJUFn4seGcJZ8KCuR1dH5HdPSeRPM/flcJEt1b5Xyi9IG+WC8mrUPGNzRbRWScvQh4mTQV+NNwEyPYFc7+xo9PbdgDzCFqoOLOYbqAITQ=")
-CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET", "bc2da170732c3c8d7b48cf93de79664b")
+CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN", "")
+CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET", "")
 DB_PATH = os.environ.get("DB_PATH", "tasks.db")
-USER_ID = os.environ.get("USER_ID", "U55ee1e87ca2fc1eb84215a7cb525b24b")
+USER_ID = os.environ.get("USER_ID", "")
 
 configuration = Configuration(access_token=CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
