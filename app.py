@@ -172,8 +172,9 @@ def check_reminders():
 def index():
     return "Bot is running! 🤖", 200
 
-@app.route("/callback", methods=['POST'])
+@app.route("/callback", methods=['POST'], strict_slashes=False)
 def callback():
+    print(f"Request path: {request.path}") # This will show up in Render logs
     signature = request.headers.get('X-Line-Signature')
     body = request.get_data(as_text=True)
     try: handler.handle(body, signature)
