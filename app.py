@@ -24,7 +24,7 @@ app = Flask(__name__)
 CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN", "")
 CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET", "")
 USER_ID = os.environ.get("USER_ID", "")
-GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL", "https://docs.google.com/spreadsheets/d/1B-m_g3rUy6_0PxwIJ2BtvDgoNX66VmX_d80-HHJt7GA/edit")
+GOOGLE_SHEET_URL = os.environ.get("GOOGLE_SHEET_URL", "https://docs.google.com/spreadsheets/d/1N3JWeiI42rGn_F6YKGmIhUWjmQhbov3SMsBiCco2XVA/edit")
 GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_SHEETS_CREDS", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
