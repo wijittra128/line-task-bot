@@ -59,12 +59,18 @@ def get_sheet():
         sheets_status = "❌ GOOGLE_SHEETS_CREDS is empty"
         return None
     try:
-        # Attempt to clean the JSON string
-        cleaned_json = GOOGLE_CREDS_JSON.strip()
-        if (cleaned_json.startswith("'") and cleaned_json.endswith("'")) or (cleaned_json.startswith('"') and cleaned_json.endswith('"')):
-            cleaned_json = cleaned_json[1:-1]
+        # Robust JSON extraction: Find first { and last }
+        raw_json = GOOGLE_CREDS_JSON.strip()
+        start_idx = raw_json.find('{')
+        end_idx = raw_json.rfind('}')
+        
+        if start_idx == -1 or end_idx == -1:
+            sheets_status = "❌ Invalid format: Could not find { or }"
+            return None
             
+        cleaned_json = raw_json[start_idx:end_idx+1]
         creds_dict = json.loads(cleaned_json)
+        
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
@@ -72,7 +78,7 @@ def get_sheet():
         sheets_status = "✅ Connected Successfully"
         return sheet
     except json.JSONDecodeError as e:
-        sheets_status = f"❌ JSON Error: {e}. Check for extra characters at the start/end."
+        sheets_status = f"❌ JSON Error: {e}. Check your JSON content."
         print(f"JSON Decode Error: {e}")
         return None
     except Exception as e:
