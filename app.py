@@ -71,14 +71,26 @@ def get_sheet():
         cleaned_json = raw_json[start_idx:end_idx+1]
         creds_dict = json.loads(cleaned_json)
         
-        # Fix private_key format (newlines often get lost in copy-paste)
+        # Super Robust Private Key Repair
         if 'private_key' in creds_dict:
-            # Ensure it starts and ends with proper markers and has \n instead of literal spaces
             pk = creds_dict['private_key']
-            if "-----BEGIN PRIVATE KEY-----" in pk and "\\n" not in pk:
-                # If there are no \n, it might be using literal spaces or actually missing them
-                # Most common issue is that Render/JSON parsing might have escaped the \n
-                creds_dict['private_key'] = pk.replace("\\n", "\n")
+            header = "-----BEGIN PRIVATE KEY-----"
+            footer = "-----END PRIVATE KEY-----"
+            if header in pk and footer in pk:
+                try:
+                    # Extract the middle part
+                    inner = pk.split(header)[1].split(footer)[0]
+                    # Remove ALL whitespace, newlines, and escaped newlines
+                    # This handles \n, \\n, spaces, etc.
+                    inner = "".join(inner.replace("\\n", "").split())
+                    
+                    # Reconstruct into proper 64-character line PEM format
+                    lines = [inner[i:i+64] for i in range(0, len(inner), 64)]
+                    repaired_pk = header + "\n" + "\n".join(lines) + "\n" + footer + "\n"
+                    creds_dict['private_key'] = repaired_pk
+                    print("✅ Private key repaired and formatted.")
+                except Exception as e:
+                    print(f"Error repairing private key: {e}")
         
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
