@@ -300,6 +300,8 @@ def handle_message(event):
             reply = get_ai_summary() # AI summarizes tasks
         elif text == "เช็คงานดิบ": # Non-AI backup
             reply = "📋 งานทั้งหมด:\n" + "\n".join([f"- {t['ID']}: {t['Description']} ({t['Status']})" for t in task_cache[:10]])
+        elif text == "แนะนำ" or text.lower() == "help":
+            reply = get_help_message()
         else:
             # ALL OTHER TEXT GOES TO GEMINI
             reply = ask_gemini(text, "คุณคือ 'น้องกราฟิก' ผู้ช่วยอัจฉริยะที่ช่วยจัดการตารางงาน และรอบรู้ทุกเรื่อง หากถูกถามเรื่องงานให้ดูข้อมูลจากตารางงานล่าสุดเสมอ แต่ถ้าถูกถามเรื่องอื่นให้ช่วยค้นหาและตอบอย่างใจดี")
