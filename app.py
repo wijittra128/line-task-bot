@@ -71,6 +71,15 @@ def get_sheet():
         cleaned_json = raw_json[start_idx:end_idx+1]
         creds_dict = json.loads(cleaned_json)
         
+        # Fix private_key format (newlines often get lost in copy-paste)
+        if 'private_key' in creds_dict:
+            # Ensure it starts and ends with proper markers and has \n instead of literal spaces
+            pk = creds_dict['private_key']
+            if "-----BEGIN PRIVATE KEY-----" in pk and "\\n" not in pk:
+                # If there are no \n, it might be using literal spaces or actually missing them
+                # Most common issue is that Render/JSON parsing might have escaped the \n
+                creds_dict['private_key'] = pk.replace("\\n", "\n")
+        
         scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_dict, scopes=scope)
         client = gspread.authorize(creds)
